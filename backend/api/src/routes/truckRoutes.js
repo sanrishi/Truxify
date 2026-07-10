@@ -42,14 +42,25 @@ const router = express.Router();
  * - Returns 409 if the number plate is already registered
  */
 router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
-  const { name, number_plate, max_capacity_tons } = req.body;
+  const sanitizedName = sanitizeTruckName(req.body.name);
+  const sanitizedPlate = sanitizeNumberPlate(req.body.number_plate);
+  const validatedCapacity = validateCapacity(req.body.max_capacity_tons);
+
+  if (!sanitizedName) {
+    return res.status(400).json({ error: 'Invalid truck name.' });
+  }
+  if (!sanitizedPlate || sanitizedPlate.length < 5) {
+    return res.status(400).json({ error: 'Invalid number plate format.' });
+  }
+  if (validatedCapacity === null) {
+    return res.status(400).json({ error: 'Invalid capacity. Must be between 1 and 100 tonnes.' });
+  }
 
   try {
-    // Check for duplicate number plate
     const { data: existing, error: checkErr } = await supabase
       .from('trucks')
       .select('id')
-      .eq('number_plate', number_plate)
+      .eq('number_plate', sanitizedPlate)
       .maybeSingle();
 
     if (checkErr) {
@@ -62,7 +73,7 @@ router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBod
 
     const { data: truck, error: insertErr } = await supabase
       .from('trucks')
-      .insert({ name, number_plate, max_capacity_tons, owner_id: req.user.id })
+      .insert({ name: sanitizedName, number_plate: sanitizedPlate, max_capacity_tons: validatedCapacity, owner_id: req.user.id })
       .select('id, name, number_plate, max_capacity_tons, created_at')
       .single();
 
@@ -98,6 +109,7 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
 
     if (name) {
       query = query.ilike('name', `%${name}%`);
+    }
     if (min_capacity) {
       query = query.gte('max_capacity_tons', Number(min_capacity));
     }
